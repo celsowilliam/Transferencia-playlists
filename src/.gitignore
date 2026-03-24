@@ -1,0 +1,7 @@
+# Ignorar arquivos de configuração sensíveis
+spotify_token.json
+credentials.json
+tokens/
+.env
+target/
+*.class
