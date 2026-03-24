@@ -21,7 +21,7 @@ public class Main {
 
             if (videoId != null) {
                 youtube.addToPlaylist(playlistId, videoId);
-                System.out.println("✔ " + t.title);
+                System.out.println("✔ " + t.title); ///////
             } else {
                 System.out.println("✖ Não encontrado: " + t.title);
             }
