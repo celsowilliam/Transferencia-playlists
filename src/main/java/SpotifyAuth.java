@@ -1,39 +1,108 @@
-import com.google.gson.*;
-import okhttp3.*;
-
-import java.awt.*;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import java.awt.Desktop;
 import java.io.*;
-import java.net.*;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Scanner;
 
 public class SpotifyAuth {
-
     private static final String CLIENT_ID = "bb79a0ce8de5431c88931e14f860d897";
     private static final String CLIENT_SECRET = "cfc8b8a90edf4a09a6911d372da18ce2";
     private static final String REDIRECT_URI = "http://127.0.0.1:8888/callback";
-
+    
+    // URLs Oficiais da API do Spotify
     private static final String AUTH_URL = "https://accounts.spotify.com/authorize";
     private static final String TOKEN_URL = "https://accounts.spotify.com/api/token";
-
-    private static final String SCOPE = "playlist-read-private playlist-read-collaborative";
-
+    
+    // Escopos necessários para ler as músicas da sua playlist
+    private static final String SCOPE = "playlist-read-private%20playlist-read-collaborative";
     private static final String TOKEN_FILE = "spotify_token.json";
-
-    private OkHttpClient client = new OkHttpClient();
-    private Gson gson = new Gson();
+    private final Gson gson = new Gson();
 
     public String getAccessToken() throws Exception {
-
         File file = new File(TOKEN_FILE);
 
-        if (file.exists()) {
-            JsonObject saved = gson.fromJson(new FileReader(file), JsonObject.class);
+        if (file.exists() && file.length() > 0) {
+            try (FileReader reader = new FileReader(file)) {
+                JsonObject saved = gson.fromJson(reader, JsonObject.class);
+                if (saved.has("refresh_token")) {
+                    String refreshToken = saved.get("refresh_token").getAsString();
+                    return refreshAccessToken(refreshToken);
+                }
+            } catch (Exception e) {
+                System.out.println("Token antigo corrompido, iniciando nova autenticação...");
+            }
+        }
+        return firstAuth();
+    }
 
-            String refreshToken = saved.get("refresh_token").getAsString();
-            return refreshAccessToken(refreshToken);
+    private String firstAuth() throws Exception {
+        // Monta a URL de Autorização
+        String authUrl = AUTH_URL + "?client_id=" + CLIENT_ID + 
+                         "&response_type=code&redirect_uri=" + REDIRECT_URI + 
+                         "&scope=" + SCOPE;
+
+        System.out.println("--- AUTENTICAÇÃO SPOTIFY ---");
+        System.out.println("Abrindo o navegador para você autorizar o app...");
+        
+        // CHAMA O MÉTODO PARA ABRIR O BRAVE/CHROME
+        abrirNavegador(authUrl);
+
+        System.out.println("\n1. No navegador, clique em 'Aceito'.");
+        System.out.println("2. Você será redirecionado para uma página de erro (é normal).");
+        System.out.println("3. COPIE o código que aparece na URL após 'code='.");
+        System.out.print("\nCole o código aqui e dê ENTER: ");
+
+        Scanner scanner = new Scanner(System.in);
+        String code = scanner.nextLine();
+        
+        return exchangeCodeForToken(code);
+    }
+
+    private String exchangeCodeForToken(String code) throws Exception {
+        String data = "grant_type=authorization_code&code=" + code + "&redirect_uri=" + REDIRECT_URI;
+        return sendTokenRequest(data);
+    }
+
+    private String refreshAccessToken(String refreshToken) throws Exception {
+        String data = "grant_type=refresh_token&refresh_token=" + refreshToken;
+        return sendTokenRequest(data);
+    }
+
+    private String sendTokenRequest(String data) throws Exception {
+        URL url = new URL(TOKEN_URL);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+
+        String auth = CLIENT_ID + ":" + CLIENT_SECRET;
+        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+        conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
+        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(data.getBytes(StandardCharsets.UTF_8));
         }
 
-        return firstAuth();
+        if (conn.getResponseCode() != 200) {
+            throw new Exception("Erro ao obter token do Spotify: " + conn.getResponseCode());
+        }
+
+        Scanner s = new Scanner(conn.getInputStream()).useDelimiter("\\A");
+        String response = s.hasNext() ? s.next() : "";
+        
+        // Salva o JSON completo (com refresh_token) para uso futuro
+        try (FileWriter writer = new FileWriter(TOKEN_FILE)) {
+            writer.write(response);
+        }
+
+        JsonObject json = gson.fromJson(response, JsonObject.class);
+        return json.get("access_token").getAsString();
     }
 
     private void abrirNavegador(String url) {
@@ -41,96 +110,13 @@ public class SpotifyAuth {
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
                 Desktop.getDesktop().browse(new URI(url));
             } else {
-                // Caso o Java não consiga detectar o Desktop (comum em alguns ambientes)
+                // Caso o Java não detecte o Desktop (comum no Windows via terminal)
                 Runtime runtime = Runtime.getRuntime();
                 runtime.exec("rundll32 url.dll,FileProtocolHandler " + url);
             }
         } catch (Exception e) {
-            System.out.println("Não foi possível abrir o navegador automaticamente. Cole este link no Brave: " + url);
+            System.out.println("Não foi possível abrir o navegador automaticamente.");
+            System.out.println("Link para autorização: " + url);
         }
-    }
-
-    private String firstAuth() throws Exception {
-
-        String url = AUTH_URL + "?client_id=" + CLIENT_ID +
-                "&response_type=code" +
-                "&redirect_uri=" + URLEncoder.encode(REDIRECT_URI, "UTF-8") +
-                "&scope=" + URLEncoder.encode(SCOPE, "UTF-8");
-
-        System.out.println("Abrindo navegador...");
-        Desktop.getDesktop().browse(new URI(url));
-
-        // servidor local para capturar o code
-        ServerSocket server = new ServerSocket(8888);
-        Socket socket = server.accept();
-
-        BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-        String line = in.readLine();
-
-        String code = line.split("code=")[1].split(" ")[0];
-
-        String response = "HTTP/1.1 200 OK\r\n\r\nLogin realizado! Pode fechar.";
-        socket.getOutputStream().write(response.getBytes());
-
-        socket.close();
-        server.close();
-
-        return requestToken(code);
-    }
-
-    private String requestToken(String code) throws Exception {
-
-        String credentials = CLIENT_ID + ":" + CLIENT_SECRET;
-        String basic = Base64.getEncoder().encodeToString(credentials.getBytes());
-
-        RequestBody body = new FormBody.Builder()
-                .add("grant_type", "authorization_code")
-                .add("code", code)
-                .add("redirect_uri", REDIRECT_URI)
-                .build();
-
-        Request request = new Request.Builder()
-                .url(TOKEN_URL)
-                .post(body)
-                .addHeader("Authorization", "Basic " + basic)
-                .build();
-
-        Response response = client.newCall(request).execute();
-
-        String json = response.body().string();
-
-        FileWriter writer = new FileWriter(TOKEN_FILE);
-        writer.write(json);
-        writer.close();
-
-        JsonObject obj = gson.fromJson(json, JsonObject.class);
-
-        return obj.get("access_token").getAsString();
-    }
-
-    private String refreshAccessToken(String refreshToken) throws Exception {
-
-        String credentials = CLIENT_ID + ":" + CLIENT_SECRET;
-        String basic = Base64.getEncoder().encodeToString(credentials.getBytes());
-
-        RequestBody body = new FormBody.Builder()
-                .add("grant_type", "refresh_token")
-                .add("refresh_token", refreshToken)
-                .build();
-
-        Request request = new Request.Builder()
-                .url(TOKEN_URL)
-                .post(body)
-                .addHeader("Authorization", "Basic " + basic)
-                .build();
-
-        Response response = client.newCall(request).execute();
-
-        String json = response.body().string();
-
-        JsonObject obj = gson.fromJson(json, JsonObject.class);
-
-        return obj.get("access_token").getAsString();
     }
 }

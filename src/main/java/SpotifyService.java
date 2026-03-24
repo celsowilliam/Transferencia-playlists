@@ -17,8 +17,13 @@ public class SpotifyService {
         String token = auth.getAccessToken();
 
         // URL base da API do Spotify
-        // O segredo é o "/v1/playlists/" antes do ID
+        // ADICIONE A BARRA "/" DEPOIS DE playlists
         String url = "https://api.spotify.com/v1/playlists/" + playlistId + "/tracks";
+
+        // DICA DE OURO PARA ADS: Adicione um print para conferir se a URL está bonita
+        // no terminal
+        System.out.println("Acessando: " + url);
+
         Request req = new Request.Builder()
                 .url(url)
                 .addHeader("Authorization", "Bearer " + token)

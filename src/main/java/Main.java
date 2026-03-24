@@ -4,7 +4,7 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
 
-        String spotifyPlaylistId = "37i9dQZF1EIXS32nOqD9Nf";
+        String spotifyPlaylistId = "1d2xS9htppu02AXeL0eoxY";
 
         SpotifyService spotify = new SpotifyService();
         YouTubeService youtube = new YouTubeService();
